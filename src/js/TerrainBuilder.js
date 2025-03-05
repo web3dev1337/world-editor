@@ -226,6 +226,16 @@ class ChunkManager {
 			}
 		});
 	}
+
+	removeBlock(x, y, z, blockId) {
+		const chunkKey = this.getChunkKey(x, y, z);
+		const blockKey = `${x},${y},${z}`;
+		
+		if (this.chunks.has(chunkKey)) {
+			this.chunks.get(chunkKey).delete(blockKey);
+			this.updateChunkMesh(chunkKey);
+		}
+	}
 }
 
 function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType, undoRedoManager, mode, setDebugInfo, axisLockEnabled, gridSize, cameraReset, cameraAngle, placementSize, setPageIsLoaded, customBlocks, environmentBuilderRef}, ref) {
@@ -491,62 +501,30 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 	const handleBlockPlacement = () => {
 		if (!modeRef.current || !isPlacingRef.current) return;
 
-		if (currentBlockTypeRef.current?.isEnvironment) {
-			if (isFirstBlockRef.current) {
-				environmentBuilderRef.current.placeEnvironmentModel(previewPositionRef.current.clone());
-				isFirstBlockRef.current = false;
-			}
-			return;
-		}
-
-		const newPlacementPosition = previewPositionRef.current.clone();
-		const positions = getPlacementPositions(newPlacementPosition, placementSizeRef.current);
+		const positions = getPlacementPositions(previewPositionRef.current, placementSizeRef.current);
 		let terrainChanged = false;
 
 		positions.forEach((pos) => {
 			const key = `${pos.x},${pos.y},${pos.z}`;
-			const blockMesh = instancedMeshRef.current[currentBlockTypeRef.current.id];
-
 			if (modeRef.current === "add") {
 				if (!terrainRef.current[key]) {
-					terrainRef.current[key] = currentBlockTypeRef.current.id;
+					placeBlock(pos, currentBlockTypeRef.current.id);
 					terrainChanged = true;
 					recentlyPlacedBlocksRef.current.add(key);
-
-					// Update instanced mesh directly
-					const instanceIndex = blockCountsRef.current[currentBlockTypeRef.current.id] || 0;
-					const matrix = new THREE.Matrix4().setPosition(pos.x, pos.y, pos.z);
-					blockCountsRef.current[currentBlockTypeRef.current.id] = instanceIndex + 1;
-					blockMesh.setMatrixAt(instanceIndex, matrix);
-					blockMesh.count = instanceIndex + 1;
-					blockMesh.instanceMatrix.needsUpdate = true;
 				}
 			} else if (modeRef.current === "remove") {
 				if (terrainRef.current[key]) {
+					const blockId = terrainRef.current[key];
 					delete terrainRef.current[key];
+					chunkManagerRef.current?.removeBlock(pos.x, pos.y, pos.z, blockId);
 					terrainChanged = true;
-					// Mark for rebuild since removal is more complex
-					meshesNeedsRefresh = true;
 				}
 			}
 		});
 
-		if (isFirstBlockRef.current) {
-			isFirstBlockRef.current = false;
-		}
-
 		if (terrainChanged) {
 			totalBlocksRef.current = Object.keys(terrainRef.current).length;
 			updateDebugInfo();
-
-			// Save terrain to storage asynchronously
-			DatabaseManager.saveData(STORES.TERRAIN, "current", terrainRef.current)
-				.catch(error => console.error("Error saving terrain:", error));
-
-			if (meshesNeedsRefresh) {
-				buildUpdateTerrain(); // Only rebuild if necessary (e.g., removal)
-				meshesNeedsRefresh = false;
-			}
 		}
 	};
 
@@ -1134,11 +1112,6 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 	useEffect(() => {
 		placementSizeRef.current = placementSize;
 	}, [placementSize]);
-
-	/// build update terrain when the terrain state changes
-	useEffect(() => {
-		buildUpdateTerrain();
-	}, [terrainRef.current]);
 
 	/// onSceneReady send the scene to App.js via a setter
 	useEffect(() => {
