@@ -1117,6 +1117,27 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		return () => window.removeEventListener('resize', handleResize);
 	}, []);
 
+	// Add this new utility function near other helper functions
+	const updateInstancedMeshCapacity = (mesh, requiredCapacity) => {
+		if (!mesh || mesh.instanceMatrix.count >= requiredCapacity) return mesh;
+		
+		// Increase capacity by 50% to reduce resize frequency
+		const newCapacity = Math.ceil(requiredCapacity * 1.5);
+		const newMesh = new THREE.InstancedMesh(
+			mesh.geometry,
+			mesh.material,
+			newCapacity
+		);
+		
+		// Copy existing matrices and properties
+		newMesh.instanceMatrix.copy(mesh.instanceMatrix);
+		newMesh.count = mesh.count;
+		newMesh.userData = {...mesh.userData};
+		newMesh.frustumCulled = mesh.frustumCulled;
+		
+		return newMesh;
+	};
+
 	//// HTML Return Render
 	return (
 		<>
