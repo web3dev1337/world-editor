@@ -204,7 +204,6 @@ class ChunkManager {
 		const blockCountsByType = {};
 		const transformMatrix = new THREE.Matrix4();
 
-		// Only update instances for blocks in this chunk
 		blockKeys.forEach(blockKey => {
 			const [x, y, z] = blockKey.split(',').map(Number);
 			const blockId = this.terrainRef.current[blockKey];
@@ -221,7 +220,10 @@ class ChunkManager {
 		// Update only the affected instances
 		Object.entries(blockCountsByType).forEach(([blockId, count]) => {
 			const blockMesh = this.instancedMeshRef.current[blockId];
-			blockMesh.instanceMatrix.needsUpdate = true;
+			if (blockMesh) {
+				blockMesh.count = count;
+				blockMesh.instanceMatrix.needsUpdate = true;
+			}
 		});
 	}
 }
