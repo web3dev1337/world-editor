@@ -1181,6 +1181,8 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 
 	// Modify your block placement function
 	const placeBlock = (position, blockType) => {
+		performance.mark('placeBlock-start');  // Add this at start
+		
 		const { x, y, z } = position;
 		const key = `${x},${y},${z}`;
 		
@@ -1196,12 +1198,33 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 				added: { [key]: blockType }
 			}
 		});
+
+		performance.mark('placeBlock-end');  // Add this at end
+		performance.measure('Block Placement', 'placeBlock-start', 'placeBlock-end');  // Add this after end
 	};
 
 	// Initialize ChunkManager after refs are available
 	useEffect(() => {
 		chunkManagerRef.current = new ChunkManager(terrainRef, instancedMeshRef);
 	}, []);
+
+	// Add this to TerrainBuilder.js
+	const performanceTest = () => {
+		console.time('Block Placement');
+		
+		// Test placing many blocks in same chunk
+		for(let i = 0; i < 100; i++) {
+			placeBlock({x: i % 16, y: 0, z: 0}, 1); // Same chunk
+		}
+		console.timeEnd('Block Placement');
+
+		console.time('Scattered Block Placement');
+		// Test placing blocks across different chunks
+		for(let i = 0; i < 100; i++) {
+			placeBlock({x: i * 20, y: 0, z: 0}, 1); // Different chunks
+		}
+		console.timeEnd('Scattered Block Placement');
+	}
 
 	//// HTML Return Render
 	return (
