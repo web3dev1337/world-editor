@@ -8,6 +8,7 @@ import { DatabaseManager, STORES } from "./DatabaseManager";
 import { THRESHOLD_FOR_PLACING, BLOCK_INSTANCED_MESH_CAPACITY } from "./Constants";
 import { refreshBlockTools } from "./components/BlockToolsSidebar";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils";
+import debounce from 'lodash/debounce';
 
 let meshesNeedsRefresh = false;
 
@@ -251,8 +252,7 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		updateDebugInfo();
 
 		// Save terrain to storage
-		DatabaseManager.saveData(STORES.TERRAIN, "current", terrainRef.current)
-			.catch(error => console.error("Error saving terrain:", error));
+		debouncedSaveToDatabase(terrainRef.current);
 	};
 
 	const refreshBlockMeshes = () => {
@@ -476,8 +476,7 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 			updateDebugInfo();
 
 			// Save terrain to storage asynchronously
-			DatabaseManager.saveData(STORES.TERRAIN, "current", terrainRef.current)
-				.catch(error => console.error("Error saving terrain:", error));
+			debouncedSaveToDatabase(terrainRef.current);
 
 			if (meshesNeedsRefresh) {
 				buildUpdateTerrain(); // Only rebuild if necessary (e.g., removal)
@@ -1116,6 +1115,12 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		window.addEventListener('resize', handleResize);
 		return () => window.removeEventListener('resize', handleResize);
 	}, []);
+
+	// Add near other class variables
+	const debouncedSaveToDatabase = debounce((terrainData) => {
+		DatabaseManager.saveData(STORES.TERRAIN, "current", terrainData)
+			.catch(error => console.error("Error saving terrain:", error));
+	}, 1000);
 
 	//// HTML Return Render
 	return (
