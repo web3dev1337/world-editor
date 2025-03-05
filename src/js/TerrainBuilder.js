@@ -167,9 +167,11 @@ export const getCustomBlocks = () => {
 export const blockTypes = blockTypesArray;
 
 class ChunkManager {
-	constructor() {
+	constructor(terrainRef, instancedMeshRef) {
 		this.CHUNK_SIZE = 16; // 16x16x16 chunks
 		this.chunks = new Map(); // chunk coordinates -> block keys
+		this.terrainRef = terrainRef;
+		this.instancedMeshRef = instancedMeshRef;
 	}
 
 	// Convert world position to chunk coordinate
@@ -205,8 +207,8 @@ class ChunkManager {
 		// Only update instances for blocks in this chunk
 		blockKeys.forEach(blockKey => {
 			const [x, y, z] = blockKey.split(',').map(Number);
-			const blockId = terrainRef.current[blockKey];
-			const blockMesh = instancedMeshRef.current[blockId];
+			const blockId = this.terrainRef.current[blockKey];
+			const blockMesh = this.instancedMeshRef.current[blockId];
 
 			if (blockMesh) {
 				const instanceIndex = blockCountsByType[blockId] || 0;
@@ -218,7 +220,7 @@ class ChunkManager {
 
 		// Update only the affected instances
 		Object.entries(blockCountsByType).forEach(([blockId, count]) => {
-			const blockMesh = instancedMeshRef.current[blockId];
+			const blockMesh = this.instancedMeshRef.current[blockId];
 			blockMesh.instanceMatrix.needsUpdate = true;
 		});
 	}
@@ -266,7 +268,7 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 	const tempVec2Ref = useRef(new THREE.Vector2());
 	const tempVec2_2Ref = useRef(new THREE.Vector2());
 
-	const chunkManagerRef = useRef(new ChunkManager());
+	const chunkManagerRef = useRef(null);
 
 	//* TERRAIN UPDATE FUNCTIONS *//
 	//* TERRAIN UPDATE FUNCTIONS *//
@@ -1186,7 +1188,7 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		terrainRef.current[key] = blockType;
 		
 		// Update chunk
-		chunkManagerRef.current.addBlock(x, y, z, blockType);
+		chunkManagerRef.current?.addBlock(x, y, z, blockType);
 		
 		// Save for undo/redo (existing functionality)
 		undoRedoManager?.saveUndo({
@@ -1195,6 +1197,11 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 			}
 		});
 	};
+
+	// Initialize ChunkManager after refs are available
+	useEffect(() => {
+		chunkManagerRef.current = new ChunkManager(terrainRef, instancedMeshRef);
+	}, []);
 
 	//// HTML Return Render
 	return (
