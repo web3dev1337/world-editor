@@ -166,6 +166,64 @@ export const getCustomBlocks = () => {
 // Export the initial blockTypes for backward compatibility
 export const blockTypes = blockTypesArray;
 
+class ChunkManager {
+	constructor() {
+		this.CHUNK_SIZE = 16; // 16x16x16 chunks
+		this.chunks = new Map(); // chunk coordinates -> block keys
+	}
+
+	// Convert world position to chunk coordinate
+	getChunkKey(x, y, z) {
+		const chunkX = Math.floor(x / this.CHUNK_SIZE);
+		const chunkY = Math.floor(y / this.CHUNK_SIZE);
+		const chunkZ = Math.floor(z / this.CHUNK_SIZE);
+		return `${chunkX},${chunkY},${chunkZ}`;
+	}
+
+	// Add block to chunk tracking
+	addBlock(x, y, z, blockId) {
+		const chunkKey = this.getChunkKey(x, y, z);
+		const blockKey = `${x},${y},${z}`;
+		
+		if (!this.chunks.has(chunkKey)) {
+			this.chunks.set(chunkKey, new Set());
+		}
+		this.chunks.get(chunkKey).add(blockKey);
+		
+		// Only update the affected chunk's mesh
+		this.updateChunkMesh(chunkKey);
+	}
+
+	// Update only the modified chunk
+	updateChunkMesh(chunkKey) {
+		const blockKeys = this.chunks.get(chunkKey);
+		if (!blockKeys) return;
+
+		const blockCountsByType = {};
+		const transformMatrix = new THREE.Matrix4();
+
+		// Only update instances for blocks in this chunk
+		blockKeys.forEach(blockKey => {
+			const [x, y, z] = blockKey.split(',').map(Number);
+			const blockId = terrainRef.current[blockKey];
+			const blockMesh = instancedMeshRef.current[blockId];
+
+			if (blockMesh) {
+				const instanceIndex = blockCountsByType[blockId] || 0;
+				transformMatrix.setPosition(x, y, z);
+				blockMesh.setMatrixAt(instanceIndex, transformMatrix);
+				blockCountsByType[blockId] = instanceIndex + 1;
+			}
+		});
+
+		// Update only the affected instances
+		Object.entries(blockCountsByType).forEach(([blockId, count]) => {
+			const blockMesh = instancedMeshRef.current[blockId];
+			blockMesh.instanceMatrix.needsUpdate = true;
+		});
+	}
+}
+
 function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType, undoRedoManager, mode, setDebugInfo, axisLockEnabled, gridSize, cameraReset, cameraAngle, placementSize, setPageIsLoaded, customBlocks, environmentBuilderRef}, ref) {
 
 	// Scene setup
@@ -207,6 +265,8 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 	const tempVectorRef = useRef(new THREE.Vector3());
 	const tempVec2Ref = useRef(new THREE.Vector2());
 	const tempVec2_2Ref = useRef(new THREE.Vector2());
+
+	const chunkManagerRef = useRef(new ChunkManager());
 
 	//* TERRAIN UPDATE FUNCTIONS *//
 	//* TERRAIN UPDATE FUNCTIONS *//
@@ -1116,6 +1176,25 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		window.addEventListener('resize', handleResize);
 		return () => window.removeEventListener('resize', handleResize);
 	}, []);
+
+	// Modify your block placement function
+	const placeBlock = (position, blockType) => {
+		const { x, y, z } = position;
+		const key = `${x},${y},${z}`;
+		
+		// Update terrain data
+		terrainRef.current[key] = blockType;
+		
+		// Update chunk
+		chunkManagerRef.current.addBlock(x, y, z, blockType);
+		
+		// Save for undo/redo (existing functionality)
+		undoRedoManager?.saveUndo({
+			terrain: {
+				added: { [key]: blockType }
+			}
+		});
+	};
 
 	//// HTML Return Render
 	return (
