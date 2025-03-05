@@ -270,24 +270,27 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 			delete instancedMeshRef.current[id];
 		});
 
-		// Set a large initial instance count
-		const initialInstanceCount = BLOCK_INSTANCED_MESH_CAPACITY; // Adjust this number based on your expected maximum
-
-		// Initialize meshes for all block types
+		// Initialize meshes with dynamic capacity
 		blockTypesArray.forEach((blockType) => {
-			const geometry = new THREE.BoxGeometry(1, 1, 1);
-			const materials = createBlockMaterial(blockType);
+			let mesh = instancedMeshRef.current[blockType.id];
+			const geometry = createBlockGeometry(blockType);
+			const material = createBlockMaterial(blockType);
 
-			instancedMeshRef.current[blockType.id] = new THREE.InstancedMesh(
-				geometry,
-				blockType.isMultiTexture ? materials : materials[0],
-				initialInstanceCount
-			);
+			if (!mesh) {
+				mesh = new THREE.InstancedMesh(
+					geometry,
+					Array.isArray(material) ? material : [material],
+					1000 // Start with smaller initial capacity
+				);
+			} else {
+				// Preserve existing instances while updating
+				mesh = updateInstancedMeshCapacity(mesh, mesh.count + 1000);
+				mesh.geometry = geometry;
+				mesh.material = Array.isArray(material) ? material : [material];
+			}
 
-			instancedMeshRef.current[blockType.id].userData.blockTypeId = blockType.id;
-			instancedMeshRef.current[blockType.id].count = 0;
-			instancedMeshRef.current[blockType.id].frustumCulled = false;
-			scene.add(instancedMeshRef.current[blockType.id]);
+			instancedMeshRef.current[blockType.id] = mesh;
+			scene.add(mesh);
 		});
 	}
 	
@@ -441,7 +444,17 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 
 		positions.forEach((pos) => {
 			const key = `${pos.x},${pos.y},${pos.z}`;
-			const blockMesh = instancedMeshRef.current[currentBlockTypeRef.current.id];
+			let blockMesh = instancedMeshRef.current[currentBlockTypeRef.current.id];
+
+			// Check and expand capacity before adding
+			if (blockMesh.count >= blockMesh.instanceMatrix.count) {
+				const newMesh = updateInstancedMeshCapacity(
+					blockMesh, 
+					blockMesh.count + positions.length * 2
+				);
+				instancedMeshRef.current[currentBlockTypeRef.current.id] = newMesh;
+				blockMesh = newMesh;
+			}
 
 			if (modeRef.current === "add") {
 				if (!terrainRef.current[key]) {
