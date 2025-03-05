@@ -1173,10 +1173,17 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 			{/* mesh of invisible plane to receive shadows, and grid helper to display grid */}
 			<mesh
 				ref={shadowPlaneRef}
-				position={[0.5, -0.51, 0.5]}
+				position={[0.5, -0.001, 0.5]}  // Raised slightly
 				rotation={[-Math.PI / 2, 0, 0]}
-				onPointerDown={handleMouseDown}
-				onPointerUp={handleMouseUp}
+				userData={{ isShadowPlane: true }}  // Identifier
+				onPointerDown={(e) => {
+					e.stopPropagation();
+					handleMouseDown(e);
+				}}
+				onPointerUp={(e) => {
+					e.stopPropagation();
+					handleMouseUp(e);
+				}}
 				transparent={true}
 				receiveShadow={true}
 				castShadow={false}
