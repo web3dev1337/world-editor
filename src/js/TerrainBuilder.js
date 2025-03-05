@@ -220,25 +220,50 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 
 		const blockCountsByType = {};
 		const transformMatrix = new THREE.Matrix4();
+		const batchSize = 1000; // Process blocks in batches
 
 		// Reset instance counts for all mesh types
 		Object.values(instancedMeshRef.current).forEach((instancedMesh) => {
 			instancedMesh.count = 0;
 		});
 
-		// Process each block in the terrain
-		Object.entries(terrainRef.current).forEach(([position, blockId]) => {
-			const [x, y, z] = position.split(",").map(Number);
-			const blockMesh = instancedMeshRef.current[blockId];
+		// Get all terrain entries
+		const terrainEntries = Object.entries(terrainRef.current);
+		const totalBlocks = terrainEntries.length;
+		
+		// Process terrain in batches to avoid long frames
+		const processBatch = (startIndex) => {
+			const endIndex = Math.min(startIndex + batchSize, totalBlocks);
+			
+			// Process this batch of blocks
+			for (let i = startIndex; i < endIndex; i++) {
+				const [position, blockId] = terrainEntries[i];
+				const [x, y, z] = position.split(",").map(Number);
+				const blockMesh = instancedMeshRef.current[blockId];
 
-			if (blockMesh) {
-				const instanceIndex = blockCountsByType[blockId] || 0;
-				transformMatrix.setPosition(x, y, z);
-				blockMesh.setMatrixAt(instanceIndex, transformMatrix);
-				blockCountsByType[blockId] = instanceIndex + 1;
+				if (blockMesh) {
+					const instanceIndex = blockCountsByType[blockId] || 0;
+					transformMatrix.setPosition(x, y, z);
+					blockMesh.setMatrixAt(instanceIndex, transformMatrix);
+					blockCountsByType[blockId] = instanceIndex + 1;
+				}
 			}
-		});
+			
+			// If there are more batches to process, schedule the next one
+			if (endIndex < totalBlocks) {
+				setTimeout(() => processBatch(endIndex), 0);
+			} else {
+				// Final update after all batches are processed
+				finalizeBuildUpdate(blockCountsByType);
+			}
+		};
+		
+		// Start processing the first batch
+		processBatch(0);
+	};
 
+	// Function to finalize the build update after all batches are processed
+	const finalizeBuildUpdate = (blockCountsByType) => {
 		// Update instance counts and trigger matrix updates
 		Object.entries(blockCountsByType).forEach(([blockId, instanceCount]) => {
 			const blockMesh = instancedMeshRef.current[blockId];
@@ -438,30 +463,39 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		const newPlacementPosition = previewPositionRef.current.clone();
 		const positions = getPlacementPositions(newPlacementPosition, placementSizeRef.current);
 		let terrainChanged = false;
+		const matrixUpdates = new Map(); // Track which meshes need updates
+		let blockCountDelta = 0;  // Track net change in block count
 
 		positions.forEach((pos) => {
 			const key = `${pos.x},${pos.y},${pos.z}`;
-			const blockMesh = instancedMeshRef.current[currentBlockTypeRef.current.id];
-
+			
 			if (modeRef.current === "add") {
 				if (!terrainRef.current[key]) {
 					terrainRef.current[key] = currentBlockTypeRef.current.id;
 					terrainChanged = true;
 					recentlyPlacedBlocksRef.current.add(key);
+					blockCountDelta++;  // Increment counter when adding
 
-					// Update instanced mesh directly
-					const instanceIndex = blockCountsRef.current[currentBlockTypeRef.current.id] || 0;
-					const matrix = new THREE.Matrix4().setPosition(pos.x, pos.y, pos.z);
-					blockCountsRef.current[currentBlockTypeRef.current.id] = instanceIndex + 1;
-					blockMesh.setMatrixAt(instanceIndex, matrix);
-					blockMesh.count = instanceIndex + 1;
-					blockMesh.instanceMatrix.needsUpdate = true;
+					// Track this mesh for matrix update
+					const blockId = currentBlockTypeRef.current.id;
+					const blockMesh = instancedMeshRef.current[blockId];
+					
+					if (blockMesh) {
+						if (!matrixUpdates.has(blockId)) {
+							matrixUpdates.set(blockId, {
+								mesh: blockMesh,
+								positions: []
+							});
+						}
+						matrixUpdates.get(blockId).positions.push(pos);
+					}
 				}
 			} else if (modeRef.current === "remove") {
 				if (terrainRef.current[key]) {
 					delete terrainRef.current[key];
 					terrainChanged = true;
-					// Mark for rebuild since removal is more complex
+					blockCountDelta--;  // Decrement counter when removing
+					// For removal, we'll do a full rebuild since it's more complex
 					meshesNeedsRefresh = true;
 				}
 			}
@@ -472,16 +506,34 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 		}
 
 		if (terrainChanged) {
-			totalBlocksRef.current = Object.keys(terrainRef.current).length;
+			// Update total blocks by adding/subtracting the delta instead of counting all keys
+			totalBlocksRef.current += blockCountDelta;
 			updateDebugInfo();
 
-			// Save terrain to storage asynchronously
-			debouncedSaveToDatabase(terrainRef.current);
-
-			if (meshesNeedsRefresh) {
+			// Apply matrix updates for added blocks
+			if (matrixUpdates.size > 0 && !meshesNeedsRefresh) {
+				const transformMatrix = new THREE.Matrix4();
+				
+				matrixUpdates.forEach(({mesh, positions}, blockId) => {
+					const currentCount = blockCountsRef.current[blockId] || 0;
+					
+					positions.forEach((pos, index) => {
+						transformMatrix.setPosition(pos.x, pos.y, pos.z);
+						mesh.setMatrixAt(currentCount + index, transformMatrix);
+					});
+					
+					// Update count and schedule matrix update
+					mesh.count = currentCount + positions.length;
+					blockCountsRef.current[blockId] = mesh.count;
+					scheduleMatrixUpdate(blockId);
+				});
+			} else if (meshesNeedsRefresh) {
 				buildUpdateTerrain(); // Only rebuild if necessary (e.g., removal)
 				meshesNeedsRefresh = false;
 			}
+
+			// Save terrain to storage asynchronously
+			debouncedSaveToDatabase(terrainRef.current);
 		}
 	};
 
@@ -530,7 +582,7 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 	const updatePreviewPosition = () => {
 		// Skip update if we updated too recently
 		const now = performance.now();
-		if (now - updatePreviewPosition.lastUpdate < 10) { // ~60fps
+		if (now - updatePreviewPosition.lastUpdate < 16) { // ~60fps
 			return;
 		}
 		updatePreviewPosition.lastUpdate = now;
@@ -1120,7 +1172,30 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 	const debouncedSaveToDatabase = debounce((terrainData) => {
 		DatabaseManager.saveData(STORES.TERRAIN, "current", terrainData)
 			.catch(error => console.error("Error saving terrain:", error));
-	}, 1000);
+	}, 2000);
+
+	// Add to TerrainBuilder.js
+	const pendingMatrixUpdates = new Set();
+	let matrixUpdateScheduled = false;
+
+	const scheduleMatrixUpdate = (meshId) => {
+		pendingMatrixUpdates.add(meshId);
+		if (!matrixUpdateScheduled) {
+			matrixUpdateScheduled = true;
+			requestAnimationFrame(processMatrixUpdates);
+		}
+	};
+
+	const processMatrixUpdates = () => {
+		pendingMatrixUpdates.forEach(meshId => {
+			const mesh = instancedMeshRef.current[meshId];
+			if (mesh) {
+				mesh.instanceMatrix.needsUpdate = true;
+			}
+		});
+		pendingMatrixUpdates.clear();
+		matrixUpdateScheduled = false;
+	};
 
 	//// HTML Return Render
 	return (
