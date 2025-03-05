@@ -568,11 +568,20 @@ function TerrainBuilder({ onSceneReady, previewPositionToAppJS, currentBlockType
 				tempVectorRef.current.y = Math.round(tempVectorRef.current.y - intersection.normal.y * 0.5);
 				tempVectorRef.current.z = Math.round(tempVectorRef.current.z - intersection.normal.z * 0.5);
 			} else {
-				// For add mode, add a small offset in the normal direction before rounding
-				tempVectorRef.current.add(intersection.normal.clone().multiplyScalar(0.01));
+				// For add mode, use a larger offset to ensure blocks are placed correctly
+				// Add the normal vector with a larger offset to ensure we place on the face
+				tempVectorRef.current.add(intersection.normal.clone().multiplyScalar(0.5));
+				// Round to nearest integer to snap to grid
 				tempVectorRef.current.x = Math.round(tempVectorRef.current.x);
 				tempVectorRef.current.y = Math.round(tempVectorRef.current.y);
 				tempVectorRef.current.z = Math.round(tempVectorRef.current.z);
+				
+				// Check if there's already a block at this position
+				const key = `${tempVectorRef.current.x},${tempVectorRef.current.y},${tempVectorRef.current.z}`;
+				if (terrainRef.current[key]) {
+					// If there is, adjust the position based on the normal
+					tempVectorRef.current.add(intersection.normal);
+				}
 			}
 
 			// Maintain Y position during placement
